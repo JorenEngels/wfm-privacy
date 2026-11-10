@@ -1,0 +1,31 @@
+# Kleine geheimen-scan (keuze Joren 10/11). security-baseline is privé en
+# niet bruikbaar vanuit deze publieke repo; daarom een losse workflow met
+# openbare tools. Versie en checksum zoals in security-baseline/action.yml.
+name: security
+on:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 5 * * 1'   # wekelijks (maandag); zonder dit slaat de Meedenker alarm bij een stille repo
+permissions:
+  contents: read
+jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Installeer gitleaks (vaste versie, sha256-gecontroleerd)
+        run: |
+          set -eu
+          bin="$RUNNER_TEMP/scanbin"; mkdir -p "$bin"; echo "$bin" >> "$GITHUB_PATH"
+          dl="$(mktemp -d)"
+          GL=8.30.1
+          GL_SHA=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+          curl -fsSL --retry 3 -o "$dl/gl.tgz" "https://github.com/gitleaks/gitleaks/releases/download/v${GL}/gitleaks_${GL}_linux_x64.tar.gz"
+          echo "$GL_SHA  $dl/gl.tgz" | sha256sum -c --quiet -
+          tar -xzf "$dl/gl.tgz" -C "$bin" gitleaks
+      - name: secrets (gitleaks)
+        run: gitleaks git --no-banner --redact --exit-code 1 .
