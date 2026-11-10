@@ -1,0 +1,47 @@
+# Losse variant van de scan uit security-baseline: die repo is privé en
+# kan niet gebruikt worden vanuit deze publieke repo. Zelfde vaste versies
+# en checksums als security-baseline/action.yml (gecontroleerd 2026-11-03).
+name: security
+on:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 5 * * 1'   # wekelijks (maandag); zonder dit slaat de Meedenker alarm bij een stille repo
+permissions:
+  contents: read
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Installeer scanners (vaste versies, sha256-gecontroleerd)
+        run: |
+          set -eu
+          bin="$RUNNER_TEMP/scanbin"; mkdir -p "$bin"; echo "$bin" >> "$GITHUB_PATH"
+          dl="$(mktemp -d)"
+          GL=8.30.1
+          GL_SHA=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+          curl -fsSL --retry 3 -o "$dl/gl.tgz" "https://github.com/gitleaks/gitleaks/releases/download/v${GL}/gitleaks_${GL}_linux_x64.tar.gz"
+          echo "$GL_SHA  $dl/gl.tgz" | sha256sum -c --quiet -
+          tar -xzf "$dl/gl.tgz" -C "$bin" gitleaks
+          OSV=2.7.0
+          OSV_SHA=160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+          curl -fsSL --retry 3 -o "$dl/osv" "https://github.com/google/osv-scanner/releases/download/v${OSV}/osv-scanner_linux_amd64"
+          echo "$OSV_SHA  $dl/osv" | sha256sum -c --quiet -
+          install -m 0755 "$dl/osv" "$bin/osv-scanner"
+          pipx install "semgrep==1.183.0" >/dev/null
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: secrets (gitleaks)
+        run: gitleaks git --no-banner --redact --exit-code 1 .
+      - name: code (semgrep)
+        run: semgrep scan --config p/default --metrics off --disable-nosem --error --quiet .
+      - name: bibliotheken (osv-scanner)
+        run: |
+          set +e
+          osv-scanner scan source -r .
+          rc=$?
+          if [ $rc -eq 128 ]; then echo "bibliotheken: nvt (geen lockfile)"; exit 0; fi
+          exit $rc
